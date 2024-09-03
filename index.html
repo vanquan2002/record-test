@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TEST RECORD</title>
+</head>
+<body>
+    <div>
+        <h1>Ghi âm và nhận dạng giọng nói</h1>
+        <button id="startButton">Ghi</button>
+        <button id="stopButton">Dừng</button>
+        <button id="sendButton">Gửi</button>
+        <button id="downloadButton">Tải</button>
+        <div id="result"></div>
+        <audio id="audioPlayback" controls style="display: none;"></audio>
+    </div>
+
+    <script>
+        
+        const startButton = document.getElementById('startButton');
+        const stopButton = document.getElementById('stopButton');
+        const sendButton = document.getElementById('sendButton');
+        const downloadButton = document.getElementById('downloadButton');
+        const resultDiv = document.getElementById('result');
+        const audioPlayback = document.getElementById('audioPlayback');
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let recognition;
+        let audioBlob;
+
+        // Khởi tạo SpeechRecognition
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.lang = 'vi-VN'; /// loại ngôn ngữ, này dang chọn tiếng việt
+
+            recognition.onresult = function(event) {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript;
+                    } else {
+                        interimTranscript += event.results[i][0].transcript;
+                    }
+                }
+
+                resultDiv.innerHTML = finalTranscript + '<i style="color:#999">' + interimTranscript + '</i>';
+            };
+
+            recognition.onerror = function(event) {
+                console.error('Lỗi nhận dạng giọng nói:', event.error);
+            };
+        } else {
+            console.error('Trình duyệt không hỗ trợ Web Speech API');
+        }
+
+        startButton.onclick = async function() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                startRecordingAndRecognition(stream);
+            } catch (err) {
+                if (err.name === "NotAllowedError") {
+                    alert("Vui lòng cấp quyền truy cập microphone cho trang web.");
+                } else if (err.name === "NotFoundError") {
+                    alert("Không tìm thấy thiết bị microphone.");
+                } else {
+                    alert("Lỗi khi truy cập microphone: " + err.message);
+                }
+            }
+        };
+
+        stopButton.onclick = function() {
+            stopRecordingAndRecognition();
+        };
+
+        sendButton.onclick = function() {
+            sendDataToServer();
+        };
+
+        downloadButton.onclick = function() {
+            if (audioBlob) {
+                const url = URL.createObjectURL(audioBlob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'recording.mp4';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+        };
+        
+        
+        function startRecordingAndRecognition(stream) {
+            audioChunks = [];
+            mediaRecorder = new MediaRecorder(stream);
+            mediaRecorder.start();
+
+            mediaRecorder.ondataavailable = function(e) {
+                audioChunks.push(e.data);
+            };
+
+            mediaRecorder.onstop = function() {
+                audioBlob = new Blob(audioChunks, { type: 'audio/mp4' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                audioPlayback.src = audioUrl;
+                audioPlayback.style.display = 'block';
+            };
+
+            if (recognition) {
+                recognition.start();
+            }
+
+            startButton.disabled = true;
+            stopButton.disabled = false;
+            sendButton.disabled = true;
+            downloadButton.disabled = true;
+        }
+        
+        function stopRecordingAndRecognition() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+
+            if (recognition) {
+                recognition.stop();
+            }
+
+            startButton.disabled = false;
+            stopButton.disabled = true;
+            sendButton.disabled = false;
+            downloadButton.disabled = false;
+        }
+
+        function sendDataToServer() {
+            if (!audioBlob) {
+                console.error('Không có dữ liệu audio để gửi');
+                return;
+            }
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'recording.mp4'); /// tên file
+            formData.append('transcription', resultDiv.textContent);
+
+            fetch('https://izma.transtechvietnam.com/api/posts', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                console.log('Thành công:', data);
+                alert('Dữ liệu đã được gửi lên server thành công!');
+            })
+            .catch((error) => {
+                console.error('Lỗi:', error);
+                alert('Lỗi khi gửi dữ liệu lên server.');
+            });
+
+            sendButton.disabled = true;
+        }
+
+        audioPlayback.onerror = function(event) {
+            console.error('Lỗi phát lại audio:', event);
+        };
+
+    </script>
+</body>
+</html>
